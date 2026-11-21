@@ -1,0 +1,9 @@
+{
+  "resources": {
+    "includes": [
+      { "pattern": "librocksdbjni-.*\\.(so|jnilib|dll)" },
+      { "pattern": "application\\.properties" },
+      { "pattern": "logback\\.xml" }
+    ]
+  }
+}

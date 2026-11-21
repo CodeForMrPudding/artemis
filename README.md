@@ -2,6 +2,54 @@
 
 Stack: Java on GraalVM, Micronaut, Lombok, RocksDB.
 
+Daily findings, lessons, fixes, verification and agreed next tasks are kept in [the progress log](log/README.md). Demo scripts and example programs are grouped under [demo/](demo/README.md).
+
+## Build and use the collection API
+
+The Java 21 Gradle project under `io.artemis` implements the in-process `CollectionService`, durable RocksDB storage, recovery, a bounded single writer, and exact top-k search with `FlatIndex`. It supports L2, inner product and normalized cosine metrics. The build order below replaces the flat index with HNSW in a later milestone.
+
+Set `JAVA_HOME` to a JDK 21 installation, then use the checked-in Gradle wrapper:
+
+```bash
+./gradlew clean build
+./gradlew rocksDbSpike
+./gradlew installDist
+build/install/artemis/bin/artemis roundtrip build/manual-spike
+# End-to-end collection API check, then recovery in another process (fresh disposable directory):
+build/install/artemis/bin/artemis api-write build/manual-api
+build/install/artemis/bin/artemis api-read build/manual-api
+```
+
+For the full spec demo with every mapped edge case, native/process recovery, and measured p50/p95/p99 API latency, run `bash demo/full-demo.sh` with JDK 21 and GraalVM JDK 21. It generates a browsable report and raw latency samples in a fresh directory under `build/`. See [full demo and methodology](docs/full-demo.md).
+
+For the shorter introductory walkthrough, use `bash demo/demo.sh`; its code is in [CollectionApiDemo.java](demo/CollectionApiDemo.java).
+
+`build` runs the tests and produces the library/source jars and application distributions in `build/libs` and `build/distributions`. `rocksDbSpike` uses a dedicated directory under `build/` and checks a synced batch, deletion, and readback after reopening. The application starts a Micronaut context without a network server.
+
+For the native executable, set `JAVA_HOME` and `GRAALVM_HOME` to a GraalVM JDK 21 installation with `native-image`, and install the platform C/C++ toolchain:
+
+```bash
+./gradlew nativeRocksDbSpike
+# Builds build/native/nativeCompile/artemis-spike and runs the native smoke checks.
+```
+
+Only use the spike with disposable databases. It writes fixed sample keys; it is not the collection API or the final storage format. See [native-image spike](docs/native-image-spike.md) for versions, verification evidence, JNI configuration, and limitations. The API reference is [src/main/java/io/artemis/api/collection-api](src/main/java/io/artemis/api/collection-api), an extensionless Markdown document.
+
+Use `CollectionService` directly from a Micronaut context; there is no network server:
+
+```java
+try (var context = ApplicationContext.run(Map.of("vectordb.data-dir", "./data"))) {
+    var collections = context.getBean(CollectionService.class);
+    collections.createCollection(new CollectionConfig("documents", 2, DistanceMetric.COSINE, HnswParams.defaults()));
+    collections.upsert("documents", new VectorRecord("one", new float[]{3, 4}, Map.of("kind", "example")));
+    var hits = collections.search(new SearchRequest("documents", new float[]{1, 0}, 10, null, true, false));
+}
+```
+
+`vectordb.enabled` defaults to true; set it false in component-only contexts to avoid opening storage. Each active core needs its own `vectordb.data-dir`. See [collection API implementation](docs/collection-api.md) for concurrency, configuration, storage format, replay semantics and verification.
+
+`RequestValidator` checks request shape before enqueueing. Callers with collection state also call `validateDimension` and `validateVectorForMetric`; these checks neither normalize nor copy caller inputs. Limits bind under `vectordb.limits`. The storage contract and codecs are in `io.artemis.storage`, and a reusable `InMemoryStorageEngine` is packaged through Gradle's `java-test-fixtures` plugin. See [validation and storage contracts](docs/validation-storage.md) for the API, limits, ownership rules, and fixture usage.
+
 ## Overview
 
 Stage 1 is a single-process vector database: it stores vectors durably in an embedded key-value engine and answers approximate nearest-neighbour (ANN) queries over them. There is no networking, sharding or replication yet. Every later stage (RPC, sharding, Raft replication) wraps this core, so its interfaces must stay stable.
@@ -19,7 +67,7 @@ Stage 1 is a single-process vector database: it stores vectors durably in an emb
 - Rich metadata filtering and hybrid (keyword plus vector) search.
 - GPU or SIMD tuning beyond a simple, correct distance kernel.
 
-Detailed design of the public API: [collection-api.md](collection-api.md).
+Detailed design of the public API: [Collection API design](src/main/java/io/artemis/api/collection-api).
 
 ## Architecture
 
@@ -111,7 +159,7 @@ A write is durable once the KV batch commits, and the in-memory index is updated
 
 ## Core interfaces
 
-Five interfaces form the seams of the system. They are written here language-neutral; adapt the signatures to your language's idioms. The two that matter most for later stages are `StorageEngine` (swapping your own engine in) and `CommandApplier` (feeding it from a Raft log). The Java form of `CollectionApi` is in [collection-api.md](collection-api.md).
+Five interfaces form the seams of the system. They are written here language-neutral; adapt the signatures to your language's idioms. The two that matter most for later stages are `StorageEngine` (swapping your own engine in) and `CommandApplier` (feeding it from a Raft log). The Java form of `CollectionApi` is in the [Collection API design](src/main/java/io/artemis/api/collection-api).
 
 ```text
 interface StorageEngine {

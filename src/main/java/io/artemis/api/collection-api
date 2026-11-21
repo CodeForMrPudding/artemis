@@ -1,0 +1,340 @@
+# Collection API — Design
+
+The Collection API is the only entry point to the single-node core: a Java service interface, `CollectionService`, that sends writes through the command applier and answers reads from the index and the storage adapter. It is defined so that stage 2 can put gRPC in front of it without changing it. See the [core design](../../../../../../README.md) for the architecture around it.
+
+**Implementation:** This API is implemented on Java 21/Micronaut 4 using RocksDB and the FlatIndex stage from the build order below. See [implementation and verification](../../../../../../docs/collection-api.md). HNSW remains a later index replacement. Two result ambiguities were resolved with the user: batch created/updated counts describe final unique IDs, and replay returns an explicit `AlreadyApplied` outcome.
+
+**Implemented stack:** Java 21 (sealed interfaces, records, pattern-matching `switch`), Micronaut 4.x, GraalVM, Lombok, and the `rocksdbjni` artifact.
+
+## Scope
+
+- In scope: the in-process Java API, its types, validation, error model, threading, Micronaut wiring, and GraalVM notes.
+- Out of scope: HTTP or gRPC endpoints (stage 2), authentication, filtering on metadata.
+- Micronaut's role in stage 1 is dependency injection, configuration, and lifecycle. No server needs to start to use the API; tests call `CollectionService` directly.
+
+## Package layout
+
+Rename `vectordb` to your base package.
+
+```text
+vectordb
+├── api            CollectionService, CollectionServiceImpl, RequestValidator
+│   ├── model      DistanceMetric, HnswParams, CollectionConfig, CollectionInfo,
+│   │              VectorRecord, SearchRequest, SearchHit, result records
+│   └── error      VectorDbException, ErrorCode
+├── command        Command (sealed), command records, CommandApplier, ApplyOutcome
+├── catalog        CollectionRegistry, CollectionState
+├── storage        StorageEngine, RocksDbStorageEngine, namespaces and key codecs
+├── index          VectorIndex, FlatIndex, HnswIndex
+├── math           DistanceFunction and one implementation per metric
+└── config         LimitsConfig, WriterConfig, EngineLifecycle
+```
+
+## Domain types
+
+Use Java records for immutable data. Lombok adds `@Builder` to the records that have optional fields, and `@Slf4j` plus `@RequiredArgsConstructor` on services. Lombok runs at compile time, so it has no effect on native-image.
+
+```java
+public enum DistanceMetric { L2, INNER_PRODUCT, COSINE }
+
+public record HnswParams(int m, int efConstruction, int efSearch) {
+    // Common starting points; tune with the stage 1 benchmarks.
+    public static HnswParams defaults() { return new HnswParams(16, 200, 50); }
+}
+
+@Builder
+public record CollectionConfig(String name, int dimension, DistanceMetric metric, HnswParams hnsw) {}
+
+public record CollectionInfo(long id, CollectionConfig config, long vectorCount) {}
+
+public record VectorRecord(String id, float[] vector, Map<String, String> metadata) {}
+
+@Builder
+public record SearchRequest(
+        String collection,
+        float[] query,
+        int k,
+        Integer efSearch,          // null means the collection default
+        boolean includeMetadata,
+        boolean includeVector) {}
+
+public record SearchHit(String id, float distance, Map<String, String> metadata, float[] vector) {}
+
+public record UpsertResult(boolean created, long sequence) {}
+public record BatchUpsertResult(int created, int updated, long sequence) {}
+public record DeleteResult(boolean existed, long sequence) {}
+```
+
+Points to know about these types:
+
+- **`float[]` in a record** compares by reference, and the array is mutable. Never use records with vectors as map keys or in `equals` assertions; compare with `Arrays.equals`. The service copies the incoming array before normalizing, so callers may reuse their buffer after the call returns.
+- **`distance` means smaller is closer, for every metric.** L2 returns the squared Euclidean distance (no square root, same ordering). COSINE returns `1 - cosine similarity`. INNER_PRODUCT returns the negated dot product. One rule for callers, and the index always sorts ascending.
+- **Cosine collections store normalized vectors**, so `get` and `includeVector` return the normalized vector, not the original. This follows from the "normalize once at insert" decision in the core design. Open question below.
+- **Metadata is `String` to `String`** in this stage. It keeps the on-disk encoding trivial. Typed values can come later with filtering.
+
+## Service interface
+
+```java
+public interface CollectionService {
+
+    CollectionInfo createCollection(CollectionConfig config);
+    void dropCollection(String name);
+    CollectionInfo getCollection(String name);
+    List<CollectionInfo> listCollections();
+
+    UpsertResult upsert(String collection, VectorRecord record);
+    BatchUpsertResult upsertBatch(String collection, List<VectorRecord> records);
+    Optional<VectorRecord> get(String collection, String id);
+    DeleteResult delete(String collection, String id);
+
+    List<SearchHit> search(SearchRequest request);
+}
+```
+
+This adds three methods to the language-neutral `CollectionApi` in the core design: `getCollection` and `listCollections` (you need them to inspect state and write tests), and `upsertBatch`. The batch is one command, one atomic RocksDB `WriteBatch` and one synced write, so it is the main throughput lever. It will also be one Raft log entry in stage 4.
+
+### Operation semantics
+
+| Method | Returns | Errors | Retry-safe |
+| --- | --- | --- | --- |
+| `createCollection` | `CollectionInfo` with `vectorCount` 0 | `INVALID_ARGUMENT`, `ALREADY_EXISTS` | No, a second call gives `ALREADY_EXISTS` |
+| `dropCollection` | nothing | `NOT_FOUND` | No, a second call gives `NOT_FOUND` |
+| `getCollection` | `CollectionInfo` | `NOT_FOUND` | Yes |
+| `listCollections` | all collections sorted by name | none | Yes |
+| `upsert` | `UpsertResult` | `INVALID_ARGUMENT`, `NOT_FOUND`, `RESOURCE_EXHAUSTED`, `UNAVAILABLE` | Yes |
+| `upsertBatch` | `BatchUpsertResult`, all or nothing | same as `upsert` | Yes |
+| `get` | `Optional.empty()` if the id is absent | `NOT_FOUND` for a missing collection | Yes |
+| `delete` | `DeleteResult`, `existed` false if the id was absent | `NOT_FOUND` for a missing collection | Yes |
+| `search` | at most `k` hits, ascending by distance | `INVALID_ARGUMENT`, `NOT_FOUND` | Yes |
+
+Rules that remove ambiguity:
+
+- Deleting a missing id is not an error. It returns `existed = false`, so a retry after a timeout is safe.
+- In a batch, the later record wins when an id appears twice. Every record is validated before any is applied.
+- `search` returns fewer than `k` hits when the collection is smaller, and an empty list for an empty collection. Ties break on ascending internal id so results are deterministic.
+- `efSearch` defaults to the collection's value and is raised to at least `k`.
+- A write returns only after the KV commit and the index update are both done, so a `search` that starts afterwards on the same node sees it. The `sequence` in each result lets a later stage wait until a replica has applied that write.
+
+## Validation
+
+Validation happens in two places, for a reason. Shape checks need no state, so the service runs them first and rejects bad input before it reaches the writer queue. Checks that depend on state (does the collection exist, does the dimension match, does the id exist) run inside the command applier on the writer thread. State can change between a service-side check and the apply, and every Raft replica must reach the same outcome for the same command, so the authoritative decision has to depend only on the command and the state at that point in the sequence.
+
+All limits are configuration, not constants. The values below are proposed defaults, not measured ones.
+
+| Field | Rule | Checked in | Error |
+| --- | --- | --- | --- |
+| Collection name | 1 to 64 characters, `[A-Za-z0-9_-]` | service | `INVALID_ARGUMENT` |
+| Dimension | 1 to `max-dimension` (proposed 4096) | service | `INVALID_ARGUMENT` |
+| Metric, HNSW params | not null; `m`, `efConstruction`, `efSearch` positive | service | `INVALID_ARGUMENT` |
+| Vector id | 1 to 256 bytes of UTF-8 | service | `INVALID_ARGUMENT` |
+| Vector values | length equals the dimension; every value finite (no NaN or infinity) | service for finiteness, applier for dimension | `INVALID_ARGUMENT` |
+| Cosine vector | not all zeros, since it cannot be normalized | service | `INVALID_ARGUMENT` |
+| Metadata | at most 32 entries, keys up to 64 bytes, values up to 1024 bytes (proposed) | service | `INVALID_ARGUMENT` |
+| Batch size | 1 to `max-batch-size` (proposed 1000) | service | `INVALID_ARGUMENT` |
+| `k` | 1 to `max-k` (proposed 1000) | service | `INVALID_ARGUMENT` |
+| Collection exists | by name | applier (writes), registry (reads) | `NOT_FOUND` |
+| Collection name free | on create | applier | `ALREADY_EXISTS` |
+
+Write the validators by hand rather than with a bean-validation library. The rules are shared between the service and the applier, they must be deterministic, and hand-written checks avoid runtime reflection under GraalVM.
+
+## Error model
+
+```java
+public enum ErrorCode {
+    INVALID_ARGUMENT, NOT_FOUND, ALREADY_EXISTS,
+    RESOURCE_EXHAUSTED, UNAVAILABLE, INTERNAL
+}
+
+public class VectorDbException extends RuntimeException {
+    private final ErrorCode code;
+    // constructor, getCode()
+}
+```
+
+The names deliberately match gRPC's canonical status codes, so stage 2 maps `ErrorCode` to `io.grpc.Status.Code` one to one. Use one exception class plus a code, rather than a class per error, so the mapping stays in one switch.
+
+| Situation | Code |
+| --- | --- |
+| Bad shape, wrong dimension, zero cosine vector | `INVALID_ARGUMENT` |
+| Collection missing | `NOT_FOUND` |
+| Create on an existing name | `ALREADY_EXISTS` |
+| Writer queue full | `RESOURCE_EXHAUSTED` |
+| Engine still recovering or shutting down; wait for a write timed out | `UNAVAILABLE` |
+| RocksDB failure or an invariant broke | `INTERNAL` |
+
+A timed-out wait does not cancel the command: it may still be applied, so the outcome is unknown to the caller. Upserts and deletes are idempotent, so retrying is safe. A create or drop retry may return `ALREADY_EXISTS` or `NOT_FOUND`, which the caller should read as "probably done".
+
+## Commands and the applier
+
+Every write becomes a command. The service builds the command after the stateless checks and hands it to the applier. The applier is the one place that changes state.
+
+```java
+public sealed interface Command<R> permits CreateCollectionCmd, DropCollectionCmd, UpsertBatchCmd, DeleteCmd {}
+
+public record CreateCollectionCmd(CollectionConfig config) implements Command<CollectionInfo> {}
+public record DropCollectionCmd(String name) implements Command<Void> {}
+public record UpsertBatchCmd(String collection, List<VectorRecord> records) implements Command<BatchUpsertResult> {}
+public record DeleteCmd(String collection, String id) implements Command<DeleteResult> {}
+
+public sealed interface ApplyOutcome<R> permits Applied, Rejected, AlreadyApplied {}
+public record Applied<R>(long sequence, R result) implements ApplyOutcome<R> {}
+public record Rejected<R>(long sequence, ErrorCode code, String message) implements ApplyOutcome<R> {}
+public record AlreadyApplied<R>(long sequence) implements ApplyOutcome<R> {}
+
+public interface CommandApplier {
+    <R> CompletableFuture<ApplyOutcome<R>> submit(Command<R> command);  // stage 1: assigns the sequence number
+    <R> ApplyOutcome<R> apply(long seq, Command<R> command);            // deterministic; Raft calls this in stage 4
+    long lastAppliedSeq();
+}
+```
+
+- **A rejected command is an outcome, not an exception.** In stage 4 a command that fails validation is still in the Raft log, and every replica must reject it identically. Returning `Rejected` keeps that explicit. The service turns it into a `VectorDbException`.
+- A rejected command still consumes and persists its sequence number. After a crash, replay at or below the durable last-applied sequence returns `AlreadyApplied` without changing state.
+- `submit` puts the command on a bounded queue read by one writer thread. A full queue fails fast with `RESOURCE_EXHAUSTED` instead of blocking callers without limit.
+- The writer takes a collection's write lock only while it mutates the in-memory index, never around the RocksDB commit, so searches wait for an insert but not for an fsync.
+- Group commit (the writer draining several queued commands into one synced batch) is a later optimization. Leave it out until the benchmarks show the fsync is the bottleneck.
+
+A sketch of one write method, to show how the pieces connect:
+
+```java
+@Singleton
+@Slf4j
+@RequiredArgsConstructor
+class CollectionServiceImpl implements CollectionService {
+
+    private final EngineLifecycle lifecycle;
+    private final RequestValidator validator;
+    private final CommandApplier applier;
+    private final CollectionRegistry registry;
+    private final WriterConfig writerConfig;
+
+    @Override
+    public UpsertResult upsert(String collection, VectorRecord record) {
+        BatchUpsertResult r = upsertBatch(collection, List.of(record));
+        return new UpsertResult(r.created() == 1, r.sequence());
+    }
+
+    @Override
+    public BatchUpsertResult upsertBatch(String collection, List<VectorRecord> records) {
+        lifecycle.requireReady();                          // UNAVAILABLE while recovering
+        validator.validateUpsert(collection, records);     // stateless checks, INVALID_ARGUMENT
+        var cmd = new UpsertBatchCmd(collection, copyAndPrepare(records));
+        return await(applier.submit(cmd));
+    }
+
+    private <R> R await(CompletableFuture<ApplyOutcome<R>> future) {
+        ApplyOutcome<R> outcome;
+        try {
+            outcome = future.get(writerConfig.getRequestTimeout().toMillis(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            throw new VectorDbException(ErrorCode.UNAVAILABLE, "write outcome unknown: timed out");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new VectorDbException(ErrorCode.UNAVAILABLE, "write outcome unknown: interrupted", e);
+        } catch (ExecutionException e) {
+            throw new VectorDbException(ErrorCode.INTERNAL, "command failed", e.getCause());
+        }
+        return switch (outcome) {
+            case Applied<R> a  -> a.result();
+            case Rejected<R> r -> throw new VectorDbException(r.code(), r.message());
+            case AlreadyApplied<R> ignored -> throw new VectorDbException(ErrorCode.INTERNAL, "new command was already applied");
+        };
+    }
+    // search() and get() read from registry and storage; they never touch the queue.
+}
+```
+
+`copyAndPrepare` copies each `float[]` and normalizes cosine vectors, so the command is self-contained and deterministic.
+
+## Collections and lifecycle
+
+- `CollectionRegistry` holds a `ConcurrentHashMap<String, CollectionState>` loaded from the `catalog` namespace at startup. A `CollectionState` holds the collection id, config, its index, and its read-write lock.
+- Collection ids are assigned from a counter in `system` and never reused. A dropped and re-created name gets a new id, so leftover keys from the old collection can never be read as the new one.
+- `dropCollection` is one atomic batch: delete the catalog entry and issue a RocksDB `deleteRange` over the collection-id prefix in each namespace. Then the registry marks the state dropped and removes it. A search already running keeps its reference and finishes; new calls get `NOT_FOUND`.
+- `EngineLifecycle` goes `STARTING`, `READY`, `CLOSING`. It runs recovery (scan `vectors`, rebuild each index, read `last_applied_seq`) in a Micronaut `StartupEvent` listener and flips to `READY` at the end. Every service method calls `requireReady()` first. On shutdown a `@PreDestroy` method drains the queue, then closes RocksDB.
+
+## Micronaut wiring and configuration
+
+Limits and writer settings are interface-based configuration properties, which Micronaut resolves at compile time:
+
+```java
+@ConfigurationProperties("vectordb.limits")
+public interface LimitsConfig {
+    @Bindable(defaultValue = "4096") int getMaxDimension();
+    @Bindable(defaultValue = "1000") int getMaxBatchSize();
+    @Bindable(defaultValue = "1000") int getMaxK();
+}
+
+@ConfigurationProperties("vectordb.writer")
+public interface WriterConfig {
+    @Bindable(defaultValue = "10000") int getQueueCapacity();
+    @Bindable(defaultValue = "true")  boolean isSyncWrites();
+    @Bindable(defaultValue = "30s")   Duration getRequestTimeout();
+}
+```
+
+```yaml
+vectordb:
+  data-dir: ./data
+  limits:
+    max-dimension: 4096
+    max-batch-size: 1000
+    max-k: 1000
+  writer:
+    queue-capacity: 10000
+    sync-writes: true
+    request-timeout: 30s
+```
+
+`sync-writes` defaults to true because the core's durability guarantee depends on it. Turning it off is a benchmarking and bulk-load option.
+
+Lombok needs to run before Micronaut's annotation processor, or Micronaut will not see the generated constructors. In Gradle:
+
+```kotlin
+compileOnly("org.projectlombok:lombok")
+annotationProcessor("org.projectlombok:lombok")             // first
+annotationProcessor("io.micronaut:micronaut-inject-java")   // after Lombok
+```
+
+## GraalVM notes
+
+- Micronaut resolves injection at compile time and avoids runtime reflection, which suits native-image. Records and Lombok-generated code need no extra configuration.
+- **The risk is RocksDB.** `rocksdbjni` ships its native library inside the jar and loads it at runtime through JNI. Native-image needs that library and the JNI classes registered. The repository includes checked-in native configuration and executable smoke checks; the verification record is in `docs/native-image-spike.md`.
+- Do a one-day spike before building on it: a Micronaut app that opens RocksDB, writes a batch, reads it back, and builds as a native image. If it fails and the fix is not quick, run on a JVM (GraalVM in JIT mode) for stage 1. The `StorageEngine` interface means this choice does not leak into the rest of the code.
+- Keep the hot paths free of boxing: use `float[]` and primitive loops in the distance kernels and the index, and avoid streams there.
+
+## Testing
+
+| Test | What it checks |
+| --- | --- |
+| Validator tests | One parameterized case per row of the validation table, including NaN, empty id and oversize metadata |
+| Service with fakes | `CollectionServiceImpl` over an in-memory `StorageEngine` and `FlatIndex`, covering every row of the operation table |
+| Applier determinism | The same command list applied to two fresh engines produces identical state and identical `Applied` and `Rejected` outcomes |
+| Retry safety | Upsert and delete twice give the same state; create twice gives `ALREADY_EXISTS` |
+| Drop under load | Searches running during `dropCollection` finish, and later calls get `NOT_FOUND` |
+| Startup | With `@MicronautTest` and a temp data directory: write, restart the context, search, and confirm calls before `READY` get `UNAVAILABLE` |
+| Error mapping | Each `ErrorCode` situation in the table above produces the expected code |
+
+The applier determinism test is the one that protects stage 4. If two runs of the same commands can differ, Raft replicas would diverge.
+
+## Build order
+
+1. Model records, `ErrorCode` and `VectorDbException`.
+2. `RequestValidator` with its tests.
+3. `StorageEngine` interface, an in-memory fake, then `RocksDbStorageEngine` (do the native-image spike here).
+4. `CollectionRegistry` and the catalog namespace.
+5. `CommandApplier` with the single writer, create and drop collection first.
+6. Upsert, delete and get on the `FlatIndex`.
+7. `search`.
+8. `EngineLifecycle` and recovery.
+9. Configuration properties and the `@MicronautTest` wiring tests.
+
+## Implemented stage-1 choices
+
+- [x] Java 21 and Micronaut 4.x, matching the design's assumed stack.
+- [x] Library API, tests and executable smoke checks; no REST endpoint, consistent with the stage-1 scope.
+- [x] String-to-string metadata, as specified by the model records.
+- [x] Cosine reads return normalized vectors; no second original-vector copy is persisted.
+- [x] Durability uses the global `sync-writes` configuration; no per-request override.
+- [x] Batch counts describe final unique IDs; every input is validated and the last value wins.
+- [x] Replay at or below last-applied sequence returns `AlreadyApplied` without a mutation.

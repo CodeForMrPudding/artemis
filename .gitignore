@@ -1,0 +1,10 @@
+.gradle/
+.gradle-user-home/
+.tools/
+build/
+data/
+.idea/
+*.iml
+.DS_Store
+docs/
+__pycache__/

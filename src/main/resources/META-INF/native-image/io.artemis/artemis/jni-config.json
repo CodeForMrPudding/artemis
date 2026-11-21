@@ -1,0 +1,14 @@
+[
+  {
+    "name": "org.rocksdb.RocksDBException",
+    "methods": [
+      { "name": "<init>", "parameterTypes": ["org.rocksdb.Status"] }
+    ]
+  },
+  {
+    "name": "org.rocksdb.Status",
+    "methods": [
+      { "name": "<init>", "parameterTypes": ["byte", "byte", "java.lang.String"] }
+    ]
+  }
+]

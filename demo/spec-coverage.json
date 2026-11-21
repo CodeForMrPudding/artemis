@@ -1,0 +1,655 @@
+{
+  "spec": "src/main/java/io/artemis/api/collection-api",
+  "requirements": [
+    {
+      "id": "V01",
+      "title": "Collection name: allowed characters and 1\u201364 length",
+      "group": "Validation",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^V01 ",
+          "min_count": 7
+        },
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^B01 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "V02",
+      "title": "Dimension: invalid bounds and accepted 1/4096",
+      "group": "Validation",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^V02 ",
+          "min_count": 3
+        },
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^B02 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "V03",
+      "title": "Metric/HNSW: required values and positive parameters",
+      "group": "Validation",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^V03 ",
+          "min_count": 8
+        },
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^B02 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "V04",
+      "title": "External ID: nonempty strict UTF-8 and 256-byte bound",
+      "group": "Validation",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^V04 ",
+          "min_count": 4
+        },
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^B03 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "V05",
+      "title": "Vector/query: shape, exact dimension, NaN and both infinities",
+      "group": "Validation",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^V05 ",
+          "min_count": 14
+        },
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^B07 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "V06",
+      "title": "Cosine: reject zero, normalize without mutating input, preserve subnormals",
+      "group": "Validation",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^V06 ",
+          "min_count": 3
+        },
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^B06 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "V07",
+      "title": "Metadata: entry/key/value limits, null and empty behavior",
+      "group": "Validation",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^V07 ",
+          "min_count": 9
+        },
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^B04 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "V08",
+      "title": "Batch: 1\u20131000, validate every row before atomic application",
+      "group": "Validation",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^V08 ",
+          "min_count": 6
+        },
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^B05 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "V09",
+      "title": "k: invalid values and accepted maximum 1000",
+      "group": "Validation",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^V09 ",
+          "min_count": 3
+        },
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^B05 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "V10",
+      "title": "efSearch: positive override, default, and raise to at least k",
+      "group": "Validation",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^V10 ",
+          "min_count": 2
+        },
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^O09 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "V11",
+      "title": "Null top-level create/search requests",
+      "group": "Validation",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^V11 ",
+          "min_count": 2
+        }
+      ]
+    },
+    {
+      "id": "O01",
+      "title": "Create: empty info, invalid config, ALREADY_EXISTS retry",
+      "group": "Operation semantics",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^O01 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "O02",
+      "title": "Drop: NOT_FOUND retry, new ID on recreate, old data isolated",
+      "group": "Operation semantics",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^O02 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "O03",
+      "title": "Get collection: repeatable info, missing collection NOT_FOUND",
+      "group": "Operation semantics",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^O03 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "O04",
+      "title": "List: repeatable, sorted by name",
+      "group": "Operation semantics",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^O04 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "O05",
+      "title": "Upsert: created/updated, retry, missing collection, advancing sequence",
+      "group": "Operation semantics",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^O05 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "O06",
+      "title": "Batch upsert: last duplicate wins, unique counts, retry, all-or-nothing",
+      "group": "Operation semantics",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^O06 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "O07",
+      "title": "Get vector: empty missing ID vs missing collection, owned data",
+      "group": "Operation semantics",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^O07 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "O08",
+      "title": "Delete: existed flag, missing ID/retry safe, missing collection error",
+      "group": "Operation semantics",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^O08 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "O09",
+      "title": "Search: empty/fewer-than-k, ascending distance, internal-ID ties",
+      "group": "Operation semantics",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^O09 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "S01",
+      "title": "L2/IP/cosine \u00d7 all four metadata/vector inclusion combinations",
+      "group": "Search",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^S01 ",
+          "min_count": 12
+        }
+      ]
+    },
+    {
+      "id": "CFG",
+      "title": "Every configurable validation limit is bound and enforced",
+      "group": "Configuration",
+      "mode": "Micronaut / validator",
+      "evidence": [
+        {
+          "class": "io.artemis.config.RequestValidatorConfigurationTest",
+          "pattern": ".*",
+          "min_count": 8
+        }
+      ]
+    },
+    {
+      "id": "R01",
+      "title": "Commands own copied arrays, metadata and lists",
+      "group": "Commands",
+      "mode": "Component / in-memory",
+      "evidence": [
+        {
+          "class": "io.artemis.command.CommandApplierTest",
+          "pattern": "^commandsOwn",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "R02",
+      "title": "Replay returns AlreadyApplied; rejection consumes a durable sequence",
+      "group": "Commands",
+      "mode": "Component + real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.command.CommandApplierTest",
+          "pattern": "^explicitSequence",
+          "min_count": 1
+        },
+        {
+          "class": "io.artemis.api.CollectionPersistenceTest",
+          "pattern": "^micronautRecovers",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "R03",
+      "title": "Independent command streams produce identical outcomes and storage bytes",
+      "group": "Commands",
+      "mode": "Controlled in-memory engines",
+      "evidence": [
+        {
+          "class": "io.artemis.command.CommandApplierTest",
+          "pattern": "^twoEngines",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "F01",
+      "title": "Every public method is UNAVAILABLE before READY",
+      "group": "Lifecycle",
+      "mode": "Controlled lifecycle / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^F01 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "F02",
+      "title": "Every public method is UNAVAILABLE after shutdown",
+      "group": "Lifecycle",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^F02 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "F03",
+      "title": "Bounded queue: public single/batch calls return RESOURCE_EXHAUSTED",
+      "group": "Concurrency",
+      "mode": "Gated fault injection / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionSpecDemoTest",
+          "pattern": "^F03 ",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "F04",
+      "title": "Shutdown refuses new work and drains accepted writes",
+      "group": "Concurrency",
+      "mode": "Controlled fault injection / in-memory",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionConcurrencyTest",
+          "pattern": "^fullQueue",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "F05",
+      "title": "Timeout is UNAVAILABLE with unknown outcome; accepted write still applies",
+      "group": "Concurrency",
+      "mode": "Controlled fault injection / in-memory",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionConcurrencyTest",
+          "pattern": "^timedOut",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "F06",
+      "title": "Interrupted wait preserves interrupt and does not cancel accepted command",
+      "group": "Concurrency",
+      "mode": "Controlled fault injection / in-memory",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionConcurrencyTest",
+          "pattern": "^interruptedWait",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "F07",
+      "title": "Injected storage failure is INTERNAL; no partial publication and admission stops",
+      "group": "Concurrency",
+      "mode": "Controlled fault injection / in-memory",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionConcurrencyTest",
+          "pattern": "^storageFailure",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "F08",
+      "title": "Reads continue during blocked commit and see acknowledged writes",
+      "group": "Concurrency",
+      "mode": "Controlled fault injection / in-memory",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionConcurrencyTest",
+          "pattern": "^readsDoNot",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "F09",
+      "title": "Admitted search finishes across drop; new calls return NOT_FOUND",
+      "group": "Concurrency",
+      "mode": "Controlled fault injection / in-memory",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionConcurrencyTest",
+          "pattern": "^inFlightSearch",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "F10",
+      "title": "Idle collections release database snapshots",
+      "group": "Concurrency",
+      "mode": "Controlled fault injection / in-memory",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionConcurrencyTest",
+          "pattern": "^idleCollections",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "F11",
+      "title": "Failed index publication is unavailable before waiting readers enter",
+      "group": "Concurrency",
+      "mode": "Injected index failure / in-memory",
+      "evidence": [
+        {
+          "class": "io.artemis.catalog.CollectionStateTest",
+          "pattern": "^failedPublication",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "F12",
+      "title": "Contention on one collection does not block other registry lookups",
+      "group": "Concurrency",
+      "mode": "Controlled lock contention / in-memory",
+      "evidence": [
+        {
+          "class": "io.artemis.catalog.CollectionStateTest",
+          "pattern": "^publicationContention",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "D01",
+      "title": "Restart rebuilds catalog/index and preserves normalized scores, IDs and sequence",
+      "group": "Durability",
+      "mode": "Public API / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionPersistenceTest",
+          "pattern": "^micronautRecovers",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "D02",
+      "title": "Unsupported format, malformed keys/catalog and invalid mappings/norms fail recovery",
+      "group": "Durability",
+      "mode": "Corrupt disposable RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionPersistenceTest",
+          "pattern": "^(unsupportedStorage|malformedCatalog|malformedStoredKey|nonunitStored|aliasMapping)",
+          "min_count": 5
+        }
+      ]
+    },
+    {
+      "id": "D03",
+      "title": "Acknowledged atomic batches survive forcibly terminating the writer process",
+      "group": "Durability",
+      "mode": "Child JVM killed / real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionCrashRecoveryTest",
+          "pattern": "^acknowledgedAtomic",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "M01",
+      "title": "Seeded mutation sequences and top-k match an independent map/brute-force oracle",
+      "group": "Model",
+      "mode": "Public API / in-memory",
+      "evidence": [
+        {
+          "class": "io.artemis.api.CollectionModelTest",
+          "pattern": ".*",
+          "min_count": 3
+        }
+      ]
+    },
+    {
+      "id": "K01",
+      "title": "Storage batches, all namespaces, ownership, scan/snapshot bounds, reopen and foreign-DB guards",
+      "group": "Storage",
+      "mode": "Real RocksDB",
+      "evidence": [
+        {
+          "class": "io.artemis.storage.RocksDbStorageEngineTest",
+          "pattern": ".*",
+          "min_count": 27
+        }
+      ]
+    },
+    {
+      "id": "K02",
+      "title": "Big-endian key ordering, prefix boundaries and deterministic/corruption-safe value codecs",
+      "group": "Storage",
+      "mode": "Pure codecs",
+      "evidence": [
+        {
+          "class": "io.artemis.storage.KeyCodecTest",
+          "pattern": ".*",
+          "min_count": 22
+        },
+        {
+          "class": "io.artemis.storage.ValueCodecTest",
+          "pattern": ".*",
+          "min_count": 12
+        }
+      ]
+    },
+    {
+      "id": "N01",
+      "title": "Native image build, JNI errors and separate native API recovery/search",
+      "group": "Runtime",
+      "mode": "Native executable / real RocksDB",
+      "evidence": [
+        {
+          "class": "demo.stages",
+          "pattern": "^native$",
+          "min_count": 1
+        }
+      ]
+    },
+    {
+      "id": "N02",
+      "title": "Narrated API walkthrough and recovery in separate JVM processes",
+      "group": "Runtime",
+      "mode": "JVM processes / real RocksDB",
+      "evidence": [
+        {
+          "class": "demo.stages",
+          "pattern": "^walkthrough-write$",
+          "min_count": 1
+        },
+        {
+          "class": "demo.stages",
+          "pattern": "^walkthrough-recover$",
+          "min_count": 1
+        }
+      ]
+    }
+  ]
+}

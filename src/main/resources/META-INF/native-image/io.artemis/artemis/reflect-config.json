@@ -1,0 +1,8 @@
+[
+  {
+    "name": "ch.qos.logback.core.ConsoleAppender",
+    "methods": [
+      { "name": "setTarget", "parameterTypes": ["java.lang.String"] }
+    ]
+  }
+]
